@@ -1,6 +1,3 @@
-Here’s a comprehensive README for your smart contract along with five name suggestions for your platform.
-
----
 
 #  LootForge Gaming Platform Smart Contract
 
