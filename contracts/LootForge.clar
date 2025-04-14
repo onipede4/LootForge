@@ -133,3 +133,104 @@
               transferable: transferable })
         (var-set asset-counter asset-id)
         (ok asset-id)))
+
+        ;; Transfer asset ownership
+        (define-public (transfer-asset (asset-id uint) (recipient principal))
+            (begin
+                (asserts! (<= asset-id (var-get asset-counter)) err-invalid-input)
+                (let ((asset (try! (get-asset-checked asset-id))))
+                    (asserts! (and
+                            (is-eq (get owner asset) tx-sender)
+                            (get transferable asset)
+                            (not (is-eq recipient tx-sender)))  ;; Prevent self-transfers
+                        err-not-authorized)
+                    (map-set assets
+                        { asset-id: asset-id }
+                        { owner: recipient,
+                          metadata-uri: (get metadata-uri asset),
+                          transferable: (get transferable asset) })
+                    (ok true))))
+
+        ;; List asset for sale with enhanced marketplace listing
+        (define-public (list-asset-for-sale (asset-id uint) (price uint))
+            (begin
+                (asserts! (<= asset-id (var-get asset-counter)) err-invalid-input)
+                (let ((asset (try! (get-asset-checked asset-id))))
+                    (asserts! (and 
+                            (is-eq (get owner asset) tx-sender)
+                            (> price u0)
+                            (get transferable asset))  ;; Ensure asset is transferable
+                        err-invalid-price)
+                    (map-set marketplace-listings
+                        { asset-id: asset-id }
+                        { seller: tx-sender, 
+                          price: price, 
+                          listed-at: block-height })
+                    (ok true))))
+
+        ;; Purchase listed asset with enhanced marketplace mechanics
+        (define-public (purchase-asset (asset-id uint))
+            (begin
+                (asserts! (<= asset-id (var-get asset-counter)) err-invalid-input)
+                (let
+                    ((asset (try! (get-asset-checked asset-id)))
+                     (listing (unwrap! (map-get? marketplace-listings { asset-id: asset-id }) err-not-found)))
+                    (asserts! (and
+                            (not (is-eq (get seller listing) tx-sender))
+                            (get transferable asset))
+                        err-not-authorized)
+                    (try! (stx-transfer? (get price listing) tx-sender (get seller listing)))
+                    (map-set assets
+                        { asset-id: asset-id }
+                        { owner: tx-sender,
+                          metadata-uri: (get metadata-uri asset),
+                          transferable: (get transferable asset) })
+                    (map-delete marketplace-listings { asset-id: asset-id })
+                    (ok true))))
+
+        ;; Remove asset from marketplace listing
+        (define-public (delist-asset (asset-id uint))
+            (begin
+                ;; Validate asset-id is within the range of minted assets
+                (asserts! (<= asset-id (var-get asset-counter)) err-invalid-input)
+
+                ;; Try to get the listing, return error if not found
+                (let ((listing (unwrap! (map-get? marketplace-listings { asset-id: asset-id }) err-not-found)))
+                    ;; Ensure only the seller can delist
+                    (asserts! (is-eq tx-sender (get seller listing)) err-not-authorized)
+
+                    ;; Delete the marketplace listing
+                    (map-delete marketplace-listings { asset-id: asset-id })
+
+                    ;; Return success
+                    (ok true))))
+
+        ;; Update player stats with validation
+        (define-public (update-player-stats (experience uint) (level uint))
+            (begin
+                (asserts! (<= experience max-experience) err-invalid-input)
+                (asserts! (<= level max-level) err-invalid-input)
+                (map-set player-stats
+                    { player: tx-sender }
+                    { experience: experience, level: level })
+                (ok true)))
+
+        ;; Read-only Functions
+
+        ;; Get asset details
+        (define-read-only (get-asset-details (asset-id uint))
+            (if (<= asset-id (var-get asset-counter))
+                (map-get? assets { asset-id: asset-id })
+                none))
+
+        ;; Get marketplace listing details
+        (define-read-only (get-marketplace-listing (asset-id uint))
+            (map-get? marketplace-listings { asset-id: asset-id }))
+
+        ;; Get player stats
+        (define-read-only (get-player-stats (player principal))
+            (map-get? player-stats { player: player }))
+
+        ;; Get total assets minted
+        (define-read-only (get-total-assets)
+            (var-get asset-counter))
